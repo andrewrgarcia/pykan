@@ -1195,15 +1195,19 @@ class MultKAN(nn.Module):
             #subnode_score = subnode_score_leaf.clone()
             #subnode_score[:,:width[0]] = node_score[:,:width[0]]
             subnode_score = node_score[:,:width[0]]
-            if isinstance(mult_arity, int):
-                #subnode_score[:,width[0]:] = node_score[:,width[0]:][:,:,None].expand(out_dim, node_score[width[0]:].shape[0], mult_arity).reshape(out_dim,-1)
-                subnode_score = torch.cat([subnode_score, node_score[:,width[0]:][:,:,None].expand(out_dim, node_score[width[0]:].shape[0], mult_arity).reshape(out_dim,-1)], dim=1)
-            else:
-                acml = width[0]
-                for i in range(len(mult_arity)):
-                    #subnode_score[:, acml:acml+mult_arity[i]] = node_score[:, width[0]+i]
-                    subnode_score = torch.cat([subnode_score, node_score[:, width[0]+i]].expand(out_dim, mult_arity[i]), dim=1)
-                    acml += mult_arity[i]
+
+            if node_score.shape[1] > width[0]:  # Ensure there are columns to slice
+                if isinstance(mult_arity, int):
+                    expanded_score = node_score[:, width[0]:][:, :, None].expand(out_dim, node_score.shape[1] - width[0], mult_arity)
+                    subnode_score = torch.cat([subnode_score, expanded_score.reshape(out_dim, -1)], dim=1)
+                else:
+                    acml = width[0]
+                    for i in range(len(mult_arity)):
+                        #subnode_score[:, acml:acml+mult_arity[i]] = node_score[:, width[0]+i]
+                        expanded_score = node_score[:, acml:acml+1].expand(out_dim, mult_arity[i])
+                        subnode_score = torch.cat([subnode_score, expanded_score], dim=1)
+                        acml += mult_arity[i]
+            
             return subnode_score
 
 
