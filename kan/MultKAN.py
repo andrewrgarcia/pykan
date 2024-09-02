@@ -142,6 +142,9 @@ class MultKAN(nn.Module):
             
         self.input_id = torch.arange(self.width_in[0],)
 
+        self.locked_inputs = []  # Stores indices of inputs to protect
+        self.locked_splines = {}  # Maps input indices to locked spline coefficients
+
     def initialize_from_another_model(self, another_model, x):
         another_model(x)  # get activations
         batch = x.shape[0]
@@ -851,10 +854,12 @@ class MultKAN(nn.Module):
     
     def get_params(self):
         return self.parameters()
-        
+
             
-    def fit(self, dataset, opt="LBFGS", steps=100, log=1, lamb=0., lamb_l1=1., lamb_entropy=2., lamb_coef=0., lamb_coefdiff=0., update_grid=True, grid_update_num=10, loss_fn=None, lr=1.,start_grid_update_step=-1, stop_grid_update_step=50, batch=-1,
-              metrics=None, save_fig=False, in_vars=None, out_vars=None, beta=3, save_fig_freq=1, img_folder='./video', singularity_avoiding=False, y_th=1000., reg_metric='edge_backward', display_metrics=None):
+    def fit(self, dataset, opt="LBFGS", steps=100, log=1, lamb=0., lamb_l1=1., lamb_entropy=2., lamb_coef=0., lamb_coefdiff=0., update_grid=True, grid_update_num=10, loss_fn=None, lr=1.,start_grid_update_step=-1, stop_grid_update_step=50, batch=-1, metrics=None, save_fig=False, in_vars=None, out_vars=None, beta=3, save_fig_freq=1, img_folder='./video', singularity_avoiding=False, y_th=1000., reg_metric='edge_backward', display_metrics=None):
+        
+        # Freeze the parameters for locked splines directly in act_fun layers
+        self.set_requires_grad_for_locked_splines(False)
 
         if lamb > 0. and not self.save_act:
             print('setting lamb=0. If you want to set lamb > 0, set self.save_act=True')
@@ -871,9 +876,9 @@ class MultKAN(nn.Module):
         grid_update_freq = int(stop_grid_update_step / grid_update_num)
 
         if opt == "Adam":
-            optimizer = torch.optim.Adam(self.get_params(), lr=lr)
+            optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.get_params()), lr=lr)
         elif opt == "LBFGS":
-            optimizer = LBFGS(self.get_params(), lr=lr, history_size=10, line_search_fn="strong_wolfe", tolerance_grad=1e-32, tolerance_change=1e-32, tolerance_ys=1e-32)
+            optimizer = LBFGS(filter(lambda p: p.requires_grad, self.get_params()), lr=lr, history_size=10, line_search_fn="strong_wolfe", tolerance_grad=1e-32, tolerance_change=1e-32, tolerance_ys=1e-32)
 
         results = {}
         results['train_loss'] = []
@@ -907,6 +912,7 @@ class MultKAN(nn.Module):
                 reg_ = torch.tensor(0.)
             objective = train_loss + lamb * reg_
             objective.backward()
+            self.zero_grad_for_locked_inputs()
             return objective
 
         if save_fig:
@@ -976,9 +982,43 @@ class MultKAN(nn.Module):
                 plt.close()
 
         self.log_history('fit')
+
+        # Unfreeze the parameters for locked splines if needed in future training
+        self.set_requires_grad_for_locked_splines(True) 
+
         # revert back to original state
         self.symbolic_enabled = old_symbolic_enabled
         return results
+
+    def zero_grad_for_locked_inputs(self):
+        """Zeroes the gradients for the locked inputs in the first layer to prevent updates."""
+        for input_idx in self.locked_inputs:
+            if input_idx < self.act_fun[0].coef.data.size(0):  # Assuming the first layer is indexed as `0`
+                for output_idx in range(self.act_fun[0].coef.data.size(1)):
+                    self.act_fun[0].coef.grad[input_idx][output_idx] = 0
+                    self.act_fun[0].scale_base.grad[input_idx][output_idx] = 0
+                    self.act_fun[0].scale_sp.grad[input_idx][output_idx] = 0
+
+    def set_requires_grad_for_locked_splines(self, requires_grad):
+        """Saves computational overhead by freezing gradients of locked splines; complements gradient zeroing."""
+        # Focus only on the first layer (layer_idx = 0)
+        layer_idx = 0
+
+        # Get the dimensions of the current layer's tensor
+        input_dim = self.act_fun[layer_idx].coef.data.size(0)  # First dimension size
+        output_dim = self.act_fun[layer_idx].coef.data.size(1)  # Second dimension size
+        
+        for input_idx in self.locked_inputs:
+            if input_idx < input_dim:
+                for output_idx in range(output_dim):
+                    # # Debugging information (commented out)
+                    # print(f'layer idx {layer_idx} in idx {input_idx} out idx {output_idx}')
+                    
+                    # Set requires_grad for each parameter
+                    self.act_fun[layer_idx].coef.data[input_idx][output_idx].requires_grad = requires_grad
+                    self.act_fun[layer_idx].scale_base.data[input_idx][output_idx].requires_grad = requires_grad
+                    self.act_fun[layer_idx].scale_sp.data[input_idx][output_idx].requires_grad = requires_grad
+
 
     def prune_node(self, threshold=1e-2, mode="auto", active_neurons_id=None, log_history=True):
 
@@ -1003,7 +1043,12 @@ class MultKAN(nn.Module):
             if mode == "auto":
                 self.attribute()
                 overall_important_up = self.node_scores[i+1] > threshold
-                
+
+                # Ensure locked inputs are not pruned
+                if i == 0:  # Only apply this for the input layer
+                    for input_idx in self.locked_inputs:
+                        overall_important_up[input_idx] = True
+
             elif mode == "manual":
                 overall_important_up = torch.zeros(self.width_in[i + 1], dtype=torch.bool)
                 overall_important_up[active_neurons_id[i]] = True
