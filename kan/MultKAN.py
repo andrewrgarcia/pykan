@@ -598,6 +598,7 @@ class MultKAN(nn.Module):
                         newax.axis('off')'''
 
                     plt.savefig(f'{folder}/sp_{l}_{i}_{j}.png', bbox_inches="tight", dpi=400)
+                    plt.savefig(f'{folder}/sp_{l}_{i}_{j}.pdf', bbox_inches="tight")
                     plt.close()
 
         def score2alpha(score):
