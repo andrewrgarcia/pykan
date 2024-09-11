@@ -11,3 +11,6 @@ molecule
 expressiveness
 figures
 molecule
+
+build
+pykan.egg-info
