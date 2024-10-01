@@ -1045,11 +1045,6 @@ class MultKAN(nn.Module):
                 self.attribute()
                 overall_important_up = self.node_scores[i+1] > threshold
 
-                # Ensure locked inputs are not pruned
-                if i == 0:  # Only apply this for the input layer
-                    for input_idx in self.locked_inputs:
-                        overall_important_up[input_idx] = True
-
             elif mode == "manual":
                 overall_important_up = torch.zeros(self.width_in[i + 1], dtype=torch.bool)
                 overall_important_up[active_neurons_id[i]] = True
