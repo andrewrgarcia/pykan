@@ -57,6 +57,15 @@ SYMBOLIC_LIB = {'x': (lambda x: x, lambda x: x, 1, lambda x, y_th: ((), x)),
                  #'cosh': (lambda x: torch.cosh(x), lambda x: sympy.cosh(x), 5),
                  #'sigmoid': (lambda x: torch.sigmoid(x), sympy.Function('sigmoid'), 4),
                  #'relu': (lambda x: torch.relu(x), relu),
+                'log1p': (lambda x: torch.log1p(x), lambda x: sympy.log(1 + x), 2, lambda x, y_th: ((), torch.log1p(x))),   # Logarithmic function for handling small values and growth dynamics
+                'exp_minus1': (lambda x: torch.exp(x) - 1, lambda x: sympy.exp(x) - 1, 2, lambda x, y_th: ((), torch.exp(x) - 1)),  # Exponential minus 1, useful for cumulative growth
+                'heaviside': (lambda x: torch.heaviside(x, torch.tensor([0.0])), lambda x: sympy.Heaviside(x), 3, lambda x, y_th: ((), torch.heaviside(x, torch.tensor([0.0])))),   # Heaviside step function for threshold-based models (e.g., regime changes)
+                'swish': (lambda x: x * torch.sigmoid(x), lambda x: x * sympy.Function('sigmoid')(x), 4, lambda x, y_th: ((), x * torch.sigmoid(x))),   # Smooth non-linearity (mix of sigmoid and x) useful in machine learning models
+                'logistic': (lambda x: 1 / (1 + torch.exp(-x)), lambda x: 1 / (1 + sympy.exp(-x)), 3, lambda x, y_th: ((), 1 / (1 + torch.exp(-x)))),   # Logistic function for modeling bounded growth or probabilities
+                'sin2pi': (lambda x: torch.sin(2 * torch.pi * x), lambda x: sympy.sin(2 * sympy.pi * x), 2, lambda x, y_th: ((), torch.sin(2 * torch.pi * x))),
+                'cos2pi': (lambda x: torch.cos(2 * torch.pi * x), lambda x: sympy.cos(2 * sympy.pi * x), 2, lambda x, y_th: ((), torch.cos(2 * torch.pi * x))),
+                'x/(1+x)': (lambda x: x/(1+x), lambda x: x/(1+x), 3, lambda x, y_th: ((), x/(1+x))),    # Rational functions for modeling saturation or diminishing returns
+                '1/(1+x)': (lambda x: 1/(1+x), lambda x: 1/(1+x), 2, lambda x, y_th: ((), 1/(1+x))),    # Rational functions for modeling saturation or diminishing returns
 }
 
 def create_dataset(f, 
