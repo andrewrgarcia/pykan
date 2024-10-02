@@ -269,8 +269,9 @@ class MultKAN(nn.Module):
             else:
                 self.state_id = state_id
             
-        self.input_id = torch.arange(self.width_in[0],)
-        
+        self.input_id = torch.arange(self.width_in[0],)    
+        self.locked_inputs = []  # Stores indices of inputs to protect
+
     def to(self, device):
         '''
         move the model to device
@@ -1461,6 +1462,9 @@ class MultKAN(nn.Module):
         # Most examples in toturals involve the fit() method. Please check them for useness.
         '''
 
+        # Freeze the parameters for locked splines in act_fun layers
+        self.set_requires_grad_for_locked_splines(False)  # Disable gradients
+
         if lamb > 0. and not self.save_act:
             print('setting lamb=0. If you want to set lamb > 0, set self.save_act=True')
             
@@ -1512,6 +1516,8 @@ class MultKAN(nn.Module):
                 reg_ = torch.tensor(0.)
             objective = train_loss + lamb * reg_
             objective.backward()
+            # Zero gradients for locked inputs
+            self.zero_grad_for_locked_inputs()  # Lock specific gradients
             return objective
 
         if save_fig:
@@ -1581,9 +1587,35 @@ class MultKAN(nn.Module):
                 plt.close()
 
         self.log_history('fit')
+        # Unfreeze the parameters for locked splines if needed in future training
+        self.set_requires_grad_for_locked_splines(True)
+
         # revert back to original state
         self.symbolic_enabled = old_symbolic_enabled
         return results
+
+    def zero_grad_for_locked_inputs(self):
+        """Zeroes the gradients for the locked inputs in the first layer to prevent updates."""
+        for input_idx in self.locked_inputs:
+            if input_idx < self.act_fun[0].coef.data.size(0):  # Assuming the first layer is indexed as `0`
+                for output_idx in range(self.act_fun[0].coef.data.size(1)):
+                    self.act_fun[0].coef.grad[input_idx][output_idx] = 0
+                    self.act_fun[0].scale_base.grad[input_idx][output_idx] = 0
+                    self.act_fun[0].scale_sp.grad[input_idx][output_idx] = 0
+
+    def set_requires_grad_for_locked_splines(self, requires_grad):
+        """Saves computational overhead by freezing gradients of locked splines; complements gradient zeroing."""
+        layer_idx = 0  # Focus on the first layer
+        input_dim = self.act_fun[layer_idx].coef.data.size(0)  # First dimension size
+        output_dim = self.act_fun[layer_idx].coef.data.size(1)  # Second dimension size
+
+        for input_idx in self.locked_inputs:
+            if input_idx < input_dim:
+                for output_idx in range(output_dim):
+                    # print(f'layer idx {layer_idx} in idx {input_idx} out idx {output_idx}')  # Debug log
+                    self.act_fun[layer_idx].coef.data[input_idx][output_idx].requires_grad = requires_grad
+                    self.act_fun[layer_idx].scale_base.data[input_idx][output_idx].requires_grad = requires_grad
+                    self.act_fun[layer_idx].scale_sp.data[input_idx][output_idx].requires_grad = requires_grad
 
     def prune_node(self, threshold=1e-2, mode="auto", active_neurons_id=None, log_history=True):
         '''
